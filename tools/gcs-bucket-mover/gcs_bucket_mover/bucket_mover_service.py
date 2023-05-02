@@ -47,6 +47,13 @@ def main(config, parsed_args, cloud_logger):
     config.source_storage_client.lookup_bucket(  # pylint: disable=no-member
       config.bucket_name))
 
+  if source_bucket.autoclass_enabled is True:
+    msg = "The source bucket is autoclass enabled, skipping"
+    cloud_logger.log_text(msg)
+    with yaspin(text=msg) as spinner:
+      spinner.ok(_CHECKMARK)
+    return
+
   if source_bucket is None:
     msg = "The source bucket does not exist, so we cannot continue"
     cloud_logger.log_text(msg)
@@ -366,7 +373,7 @@ def _create_target_bucket(cloud_logger, config, source_bucket_details,
   cloud_logger.log_text(spinner_text)
   with yaspin(text=spinner_text) as spinner:
     target_bucket = _create_bucket(spinner, cloud_logger, config,
-                                   bucket_name, source_bucket_details)
+                                   bucket_name, source_bucket_details, False)
     _write_spinner_and_log(
       spinner,
       cloud_logger,
@@ -390,32 +397,32 @@ def _assign_sts_permissions(cloud_logger, sts_client, config,
       The email account of the STS account
   """
 
-  spinner_text = "Assigning STS permissions to source/temp buckets"
+  spinner_text = "(Skipping)Assigning STS permissions to source/temp buckets"
   cloud_logger.log_text(spinner_text)
-  with yaspin(text=spinner_text) as spinner:
-    sts_account_email = _get_sts_iam_account_email(sts_client,
-                                                   config.target_project)
-    _write_spinner_and_log(
-      spinner,
-      cloud_logger,
-      "STS service account for IAM usage: {}".format(sts_account_email),
-    )
-    _assign_sts_iam_roles(
-      sts_account_email,
-      config.source_storage_client,
-      config.source_project,
-      config.bucket_name,
-      True,
-    )
-    _assign_sts_iam_roles(
-      sts_account_email,
-      config.target_storage_client,
-      config.target_project,
-      target_temp_bucket.name,
-      True,
-    )
-    spinner.ok(_CHECKMARK)
-    return sts_account_email
+  # with yaspin(text=spinner_text) as spinner:
+  #   sts_account_email = _get_sts_iam_account_email(sts_client,
+  #                                                  config.target_project)
+  #   _write_spinner_and_log(
+  #     spinner,
+  #     cloud_logger,
+  #     "STS service account for IAM usage: {}".format(sts_account_email),
+  #   )
+  #   _assign_sts_iam_roles(
+  #     sts_account_email,
+  #     config.source_storage_client,
+  #     config.source_project,
+  #     config.bucket_name,
+  #     True,
+  #   )
+  #   _assign_sts_iam_roles(
+  #     sts_account_email,
+  #     config.target_storage_client,
+  #     config.target_project,
+  #     target_temp_bucket.name,
+  #     True,
+  #   )
+  #   spinner.ok(_CHECKMARK)
+  #   return sts_account_email
 
 
 def _assign_sts_permissions_to_new_bucket(cloud_logger, sts_account_email,
@@ -428,17 +435,17 @@ def _assign_sts_permissions_to_new_bucket(cloud_logger, sts_account_email,
       config: A Configuration object with all of the config values needed for the script to run
   """
 
-  spinner_text = "Assigning STS permissions to new source bucket"
+  spinner_text = "(Skipping)Assigning STS permissions to new source bucket"
   cloud_logger.log_text(spinner_text)
-  with yaspin(text=spinner_text) as spinner:
-    _assign_sts_iam_roles(
-      sts_account_email,
-      config.target_storage_client,
-      config.target_project,
-      config.bucket_name,
-      False,
-    )
-    spinner.ok(_CHECKMARK)
+  # with yaspin(text=spinner_text) as spinner:
+  #   _assign_sts_iam_roles(
+  #     sts_account_email,
+  #     config.target_storage_client,
+  #     config.target_project,
+  #     config.bucket_name,
+  #     False,
+  #   )
+  #   spinner.ok(_CHECKMARK)
 
 
 def _delete_empty_source_bucket(cloud_logger, source_bucket):
@@ -452,6 +459,13 @@ def _delete_empty_source_bucket(cloud_logger, source_bucket):
   spinner_text = "Deleting empty source bucket"
   cloud_logger.log_text(spinner_text)
   with yaspin(text=spinner_text) as spinner:
+    # Delete all blobs (objects) in the bucket
+    current_bucket_objects = list(source_bucket.list_blobs(versions = False));
+    if (len(current_bucket_objects) == 0):
+      for blob in source_bucket.list_blobs(versions = True):
+        blob.delete()
+    else:
+      SystemExit("Source bucket is not empty, needs investigation...")
     source_bucket.delete()
     spinner.ok(_CHECKMARK)
 
@@ -469,7 +483,7 @@ def _recreate_source_bucket(cloud_logger, config, source_bucket_details):
   cloud_logger.log_text(spinner_text)
   with yaspin(text=spinner_text) as spinner:
     _create_bucket(spinner, cloud_logger, config, config.bucket_name,
-                   source_bucket_details)
+                   source_bucket_details, True)
     spinner.ok(_CHECKMARK)
 
 
@@ -499,12 +513,12 @@ def _remove_sts_permissions(cloud_logger, sts_account_email, config,
       bucket_name: The name of the bucket to remove the permissions from
   """
 
-  spinner_text = "Removing STS permissions from bucket {}".format(bucket_name)
+  spinner_text = "(Skipping)Removing STS permissions from bucket {}".format(bucket_name)
   cloud_logger.log_text(spinner_text)
-  with yaspin(text=spinner_text) as spinner:
-    _remove_sts_iam_roles(sts_account_email, config.target_storage_client,
-                          bucket_name)
-    spinner.ok(_CHECKMARK)
+  # with yaspin(text=spinner_text) as spinner:
+  #   _remove_sts_iam_roles(sts_account_email, config.target_storage_client,
+  #                         bucket_name)
+  #   spinner.ok(_CHECKMARK)
 
 
 def _get_project_number(project_id, credentials):
@@ -524,7 +538,7 @@ def _get_project_number(project_id, credentials):
 
 
 def _create_bucket(spinner, cloud_logger, config, bucket_name,
-                   source_bucket_details):
+                   source_bucket_details, versioning_enabled):
   """Creates a bucket and replicates all of the settings from source_bucket_details.
 
   Args:
@@ -552,9 +566,9 @@ def _create_bucket(spinner, cloud_logger, config, bucket_name,
     bucket.default_kms_key_name = source_bucket_details.default_kms_key_name
     # The target project GCS service account must be given
     # Encrypter/Decrypter permission for the key
-    _add_target_project_to_kms_key(
-      spinner, cloud_logger, config,
-      source_bucket_details.default_kms_key_name)
+    # _add_target_project_to_kms_key(
+    #   spinner, cloud_logger, config,
+    #   source_bucket_details.default_kms_key_name)
 
   if source_bucket_details.logging:
     bucket.enable_logging(
@@ -562,7 +576,7 @@ def _create_bucket(spinner, cloud_logger, config, bucket_name,
       source_bucket_details.logging["logObjectPrefix"],
     )
 
-  _create_bucket_api_call(spinner, cloud_logger, bucket)
+  _create_bucket_api_call(spinner, cloud_logger, bucket, versioning_enabled)
 
   if source_bucket_details.iam_policy:
     _update_iam_policies(config, bucket, source_bucket_details)
@@ -622,7 +636,7 @@ def _retry_if_false(result):
   wait_exponential_max=60000,
   stop_max_attempt_number=5,
 )
-def _create_bucket_api_call(spinner, cloud_logger, bucket):
+def _create_bucket_api_call(spinner, cloud_logger, bucket, versioning_enabled):
   """Calls the GCS api method to create the bucket.
 
   The method will attempt to retry up to 5 times if the 503 ServiceUnavailable
@@ -642,6 +656,8 @@ def _create_bucket_api_call(spinner, cloud_logger, bucket):
   """
 
   try:
+    bucket.autoclass_enabled = True
+    bucket.versioning_enabled = versioning_enabled
     bucket.create()
   except exceptions.ServiceUnavailable:
     _write_spinner_and_log(
@@ -983,6 +999,7 @@ def _execute_sts_job(
   """
 
   now = datetime.date.today()
+  yesterday = now - datetime.timedelta(days=1)
   if config.bucket_name == sink_bucket_name:
     time_preserved = None
   else:
@@ -1013,14 +1030,14 @@ def _execute_sts_job(
       target_project,
     "schedule": {
       "scheduleStartDate": {
-        "day": now.day - 1,
-        "month": now.month,
-        "year": now.year,
+        "day": yesterday.day,
+        "month": yesterday.month,
+        "year": yesterday.year,
       },
       "scheduleEndDate": {
-        "day": now.day - 1,
-        "month": now.month,
-        "year": now.year,
+        "day": yesterday.day,
+        "month": yesterday.month,
+        "year": yesterday.year,
       },
     },
     "transferSpec": {
