@@ -244,12 +244,9 @@ def _move_bucket(
 
 
   if not skip_sts_job:
-    # target_temp_bucket = _create_target_bucket(cloud_logger, config,
-    #                                           source_bucket_details,
-    #                                           config.temp_bucket_name)
-    target_temp_bucket = (
-    config.source_storage_client.lookup_bucket(  # pylint: disable=no-member
-      config.target_bucket_name))
+    target_temp_bucket = _create_target_bucket(cloud_logger, config,
+                                              source_bucket_details,
+                                              config.temp_bucket_name)
     sts_account_email = _assign_sts_permissions(cloud_logger, sts_client,
                                                 config, target_temp_bucket)
 
