@@ -1106,7 +1106,7 @@ def _check_sts_job(spinner, cloud_logger, sts_client, target_project, job_name):
 
   filter_string = (
     '{{"project_id": "{project_id}", "job_names": ["{job_name}"]}}').format(
-    project_id="132196189705", job_name=job_name)
+    project_id="915738570779", job_name=job_name)
 
   result = (sts_client.transferOperations().list(
     name="transferOperations", filter=filter_string).execute(num_retries=5))
