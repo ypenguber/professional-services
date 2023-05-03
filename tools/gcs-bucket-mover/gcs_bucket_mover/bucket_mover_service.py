@@ -47,17 +47,18 @@ def main(config, parsed_args, cloud_logger):
     config.source_storage_client.lookup_bucket(  # pylint: disable=no-member
       config.bucket_name))
 
+  if source_bucket is None:
+    msg = "The source bucket does not exist, so we cannot continue"
+    cloud_logger.log_text(msg)
+    raise SystemExit(msg)
+
+
   if source_bucket.autoclass_enabled is True:
     msg = "The source bucket is autoclass enabled, skipping"
     cloud_logger.log_text(msg)
     with yaspin(text=msg) as spinner:
       spinner.ok(_CHECKMARK)
     return
-
-  if source_bucket is None:
-    msg = "The source bucket does not exist, so we cannot continue"
-    cloud_logger.log_text(msg)
-    raise SystemExit(msg)
 
   # Get copies of all of the source bucket's IAM, ACLs and settings so they
   # can be copied over to the target project bucket; details are retrievable
@@ -216,37 +217,70 @@ def _move_bucket(
       source_bucket_details: The details copied from the source bucket that is being moved
       sts_client: The STS client object to be used
   """
-  target_temp_bucket = _create_target_bucket(cloud_logger, config,
-                                             source_bucket_details,
-                                             config.temp_bucket_name)
-  sts_account_email = _assign_sts_permissions(cloud_logger, sts_client,
-                                              config, target_temp_bucket)
-  _run_and_wait_for_sts_job(
-    sts_client,
-    config.target_project,
-    config.bucket_name,
-    config.temp_bucket_name,
-    cloud_logger,
-    config,
-    transfer_log_value,
-  )
+
+  current_bucket_objects_itr = source_bucket.list_blobs(versions = True)
+  skip_sts_job = False
+  try:
+    item = next(current_bucket_objects_itr)
+    if item is None:
+      skip_sts_job = True
+      msg = "Skipping STS since bucket is empty."
+      cloud_logger.log_text(msg)
+      with yaspin(text=msg) as spinner:
+        spinner.ok(_CHECKMARK)
+    else:
+      msg = f"Not Skipping STS since bucket is not empty. {item}"
+      cloud_logger.log_text(msg)
+      with yaspin(text=msg) as spinner:
+        spinner.ok(_CHECKMARK)
+  except:
+    #skip sts job
+    #Empty
+    skip_sts_job = True
+    msg = "Skipping STS since bucket is empty."
+    cloud_logger.log_text(msg)
+    with yaspin(text=msg) as spinner:
+      spinner.ok(_CHECKMARK)
+
+
+  if not skip_sts_job:
+    # target_temp_bucket = _create_target_bucket(cloud_logger, config,
+    #                                           source_bucket_details,
+    #                                           config.temp_bucket_name)
+    target_temp_bucket = (
+    config.source_storage_client.lookup_bucket(  # pylint: disable=no-member
+      config.target_bucket_name))
+    sts_account_email = _assign_sts_permissions(cloud_logger, sts_client,
+                                                config, target_temp_bucket)
+
+    _run_and_wait_for_sts_job(
+      sts_client,
+      config.target_project,
+      config.bucket_name,
+      config.temp_bucket_name,
+      cloud_logger,
+      config,
+      transfer_log_value,
+    )
 
   _delete_empty_source_bucket(cloud_logger, source_bucket)
   _recreate_source_bucket(cloud_logger, config, source_bucket_details)
-  _assign_sts_permissions_to_new_bucket(cloud_logger, sts_account_email,
-                                        config)
-  _run_and_wait_for_sts_job(
-    sts_client,
-    config.target_project,
-    config.temp_bucket_name,
-    config.bucket_name,
-    cloud_logger,
-    config,
-    transfer_log_value,
-  )
 
-  _delete_empty_temp_bucket(cloud_logger, target_temp_bucket)
-  _remove_sts_permissions(cloud_logger, sts_account_email, config,
+  if not skip_sts_job:
+    _assign_sts_permissions_to_new_bucket(cloud_logger, sts_account_email,
+                                          config)
+    _run_and_wait_for_sts_job(
+      sts_client,
+      config.target_project,
+      config.temp_bucket_name,
+      config.bucket_name,
+      cloud_logger,
+      config,
+      transfer_log_value,
+    )
+
+    _delete_empty_temp_bucket(cloud_logger, target_temp_bucket)
+    _remove_sts_permissions(cloud_logger, sts_account_email, config,
                           config.bucket_name)
 
 
@@ -902,13 +936,6 @@ def _assign_target_project_to_topic(spinner, cloud_logger, config, topic_name,
       _CHECKMARK, service_account_email, topic_name),
   )
 
-
-@retry(
-  retry_on_result=_retry_if_false,
-  wait_exponential_multiplier=10000,
-  wait_exponential_max=120000,
-  stop_max_attempt_number=10,
-)
 def _run_and_wait_for_sts_job(
     sts_client,
     target_project,
@@ -941,14 +968,17 @@ def _run_and_wait_for_sts_job(
   spinner_text = "Creating STS job"
   cloud_logger.log_text(spinner_text)
   with yaspin(text=spinner_text) as spinner:
-    sts_job_name = _execute_sts_job(
-      sts_client,
-      target_project,
-      source_bucket_name,
-      sink_bucket_name,
-      config,
-      transfer_log_value,
-    )
+    try:
+      sts_job_name = _execute_sts_job(
+        sts_client,
+        target_project,
+        source_bucket_name,
+        sink_bucket_name,
+        config,
+        transfer_log_value,
+      )
+    except:
+      print("continue")
     spinner.ok(_CHECKMARK)
 
   # Check every 10 seconds until STS job is complete
@@ -1027,7 +1057,7 @@ def _execute_sts_job(
     "status":
       "ENABLED",
     "projectId":
-      target_project,
+      "915738570779",
     "schedule": {
       "scheduleStartDate": {
         "day": yesterday.day,
@@ -1056,6 +1086,8 @@ def _execute_sts_job(
     },
   }
   transfer_job["loggingConfig"] = transfer_log_value
+  with yaspin(text="Debug") as spinner:
+    spinner.write(transfer_job)
   result = sts_client.transferJobs().create(body=transfer_job).execute(
     num_retries=5)
   return result["name"]
@@ -1077,7 +1109,7 @@ def _check_sts_job(spinner, cloud_logger, sts_client, target_project, job_name):
 
   filter_string = (
     '{{"project_id": "{project_id}", "job_names": ["{job_name}"]}}').format(
-    project_id=target_project, job_name=job_name)
+    project_id="132196189705", job_name=job_name)
 
   result = (sts_client.transferOperations().list(
     name="transferOperations", filter=filter_string).execute(num_retries=5))
