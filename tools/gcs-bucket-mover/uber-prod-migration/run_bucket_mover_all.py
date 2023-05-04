@@ -29,7 +29,7 @@ if __name__ == '__main__':
         # Sort projects in alphabetical order
         sorted_projects = sorted(buckets_by_project.keys())
 
-        # Run commands for each project in parallel
+        # Run commands for all projects in parallel
         success = True
         with Pool(processes=80) as pool:
             commands = []
@@ -40,8 +40,15 @@ if __name__ == '__main__':
                                "--config", "/home/user/professional-services/tools/gcs-bucket-mover/config.yaml",
                                bucket, project, project]
                     commands.append(command)
-                results = pool.map(run_command, commands)
-                if any(result != 0 for result in results):
+            results = []
+            for command in commands:
+                result = pool.apply_async(run_command, args=(command,))
+                results.append(result)
+
+            # Wait for the commands to complete in the order they were submitted
+            for result in results:
+                return_code = result.get()
+                if return_code != 0:
                     success = False
                     break
 
