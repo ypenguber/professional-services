@@ -1081,6 +1081,7 @@ def _execute_sts_job(
       },
       "transferOptions": {
         "deleteObjectsFromSourceAfterTransfer": True,
+        "overwriteObjectsAlreadyExistingInSink": True,
         "metadataOptions": {
           "timeCreated": time_preserved
         },
