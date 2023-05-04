@@ -519,7 +519,7 @@ def _recreate_source_bucket(cloud_logger, config, source_bucket_details):
   cloud_logger.log_text(spinner_text)
   with yaspin(text=spinner_text) as spinner:
     _create_bucket(spinner, cloud_logger, config, config.bucket_name,
-                   source_bucket_details, True)
+                   source_bucket_details, False)
     spinner.ok(_CHECKMARK)
 
 
